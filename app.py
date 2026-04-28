@@ -4,6 +4,7 @@ import shutil
 from dotenv import load_dotenv
 from typing import List
 from typing_extensions import TypedDict
+import re
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
@@ -24,8 +25,8 @@ st.set_page_config(
 load_dotenv()
 
 # --- Constants ---
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
+CHUNK_SIZE = 800  # Reduced from 1000 to avoid large chunks
+CHUNK_OVERLAP = 150  # Reduced from 200 for better separation
 KNOWLEDGE_BASE_DIR = "knowledge-base"
 PERSIST_DIRECTORY = "chroma_db"
 LLM_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -33,7 +34,32 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 # ================================================================
-# PREMIUM CSS STYLING
+# TEXT CLEANING UTILITIES
+# ================================================================
+def clean_extracted_text(text: str) -> str:
+    """Remove headers, footers, page numbers, and excessive whitespace."""
+    # Remove page numbers (e.g., "Page 1", "1", etc. at start/end of lines)
+    text = re.sub(r'^\s*(?:Page\s+)?\d+\s*$', '', text, flags=re.MULTILINE)
+    
+    # Remove common header/footer patterns
+    text = re.sub(r'^\s*(?:©|®|™|www\.|http).*$', '', text, flags=re.MULTILINE)
+    
+    # Remove excessive blank lines
+    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+    
+    # Remove leading/trailing whitespace from each line
+    lines = [line.rstrip() for line in text.split('\n')]
+    text = '\n'.join(lines)
+    
+    # Remove lines that are only special characters or very short noise
+    lines = [line for line in text.split('\n') if len(line.strip()) > 3]
+    text = '\n'.join(lines)
+    
+    return text.strip()
+
+
+# ================================================================
+# PREMIUM CSS STYLING - IMPROVED FOR VISIBILITY
 # ================================================================
 def inject_css():
     st.markdown("""
@@ -98,7 +124,7 @@ def inject_css():
         100% { background-position: 200% center; }
     }
     .hero-sub {
-        color: #9ca3af; font-size: 1.1rem; margin-top: 0.5rem; font-weight: 300;
+        color: #d1d5db; font-size: 1.1rem; margin-top: 0.5rem; font-weight: 300;
     }
     @keyframes fadeSlideUp {
         from { opacity: 0; transform: translateY(30px); }
@@ -127,7 +153,7 @@ def inject_css():
     }
     .feature-card .card-icon { font-size: 2rem; margin-bottom: 0.5rem; }
     .feature-card .card-title { font-weight: 600; color: #e8e8f0; font-size: 1rem; }
-    .feature-card .card-desc { color: #6b7280; font-size: 0.82rem; margin-top: 0.3rem; line-height: 1.4; }
+    .feature-card .card-desc { color: #b4b8c3; font-size: 0.82rem; margin-top: 0.3rem; line-height: 1.4; }
 
     /* --- Status badges --- */
     .status-badge {
@@ -155,20 +181,28 @@ def inject_css():
         50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(74,222,128,0); }
     }
 
-    /* --- Source card in chat --- */
+    /* --- Source card in chat - IMPROVED VISIBILITY --- */
     .source-card {
-        background: rgba(124,58,237,0.06);
-        border: 1px solid rgba(124,58,237,0.15);
-        border-radius: 10px; padding: 0.7rem 1rem; margin-top: 0.8rem;
-        font-size: 0.8rem; color: #9ca3af;
+        background: rgba(124,58,237,0.1);
+        border: 1px solid rgba(124,58,237,0.25);
+        border-radius: 10px; padding: 0.9rem 1.1rem; margin-top: 0.8rem;
+        font-size: 0.85rem; color: #d1d5db;
     }
-    .source-card strong { color: #c4b5fd; }
+    .source-card strong { color: #a8d5ff; }
+    .source-card a { color: #7c3aed; text-decoration: none; }
+    .source-card a:hover { text-decoration: underline; }
 
     /* --- Chat styling --- */
     .stChatMessage {
         border-radius: 16px !important;
         border: 1px solid rgba(124,58,237,0.08) !important;
         animation: fadeSlideUp 0.35s ease-out;
+        background: rgba(255,255,255,0.02) !important;
+    }
+    
+    /* Ensure chat text is readable */
+    .stChatMessage p, .stChatMessage span, .stChatMessage div {
+        color: #e8e8f0 !important;
     }
 
     /* --- Buttons --- */
@@ -196,6 +230,11 @@ def inject_css():
     section[data-testid="stFileUploader"]:hover {
         border-color: rgba(124,58,237,0.5) !important;
     }
+    
+    /* --- Markdown text visibility --- */
+    .stMarkdown {
+        color: #e8e8f0 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -213,8 +252,18 @@ def ingest_pdfs_into_vectordb():
     for file_name in os.listdir(KNOWLEDGE_BASE_DIR):
         if file_name.lower().endswith(".pdf"):
             file_path = os.path.join(KNOWLEDGE_BASE_DIR, file_name)
-            loader = PyPDFLoader(file_path)
-            documents.extend(loader.load())
+            try:
+                loader = PyPDFLoader(file_path)
+                docs = loader.load()
+                
+                # Clean extracted text
+                for doc in docs:
+                    doc.page_content = clean_extracted_text(doc.page_content)
+                
+                documents.extend(docs)
+            except Exception as e:
+                st.warning(f"Error loading {file_name}: {str(e)}")
+                continue
 
     if not documents:
         return 0
@@ -292,8 +341,8 @@ Rules:
 
 Question: {question}
 
-Respond with ONLY one word: either "vectorstore" or "web_search"
-"""
+Respond with ONLY "vectorstore" or "web_search", nothing else."""
+
     llm = ChatGroq(temperature=0, model_name=LLM_MODEL_ID)
     response = llm.invoke(prompt)
     decision = response.content.strip().lower()
@@ -326,14 +375,22 @@ def web_search_node(state: GraphState) -> GraphState:
             for r in results:
                 content = r.get("content", "")
                 url = r.get("url", "web")
-                docs.append(Document(page_content=content, metadata={"source": url}))
+                # Clean web content
+                content = clean_extracted_text(content)
+                if content:  # Only add if content is not empty after cleaning
+                    docs.append(Document(page_content=content, metadata={"source": url}))
         elif isinstance(results, dict) and "results" in results:
             for r in results["results"]:
                 content = r.get("content", "")
                 url = r.get("url", "web")
-                docs.append(Document(page_content=content, metadata={"source": url}))
+                # Clean web content
+                content = clean_extracted_text(content)
+                if content:  # Only add if content is not empty after cleaning
+                    docs.append(Document(page_content=content, metadata={"source": url}))
         elif isinstance(results, str):
-            docs.append(Document(page_content=results, metadata={"source": "web_search"}))
+            content = clean_extracted_text(results)
+            if content:
+                docs.append(Document(page_content=content, metadata={"source": "web_search"}))
 
         return {"documents": docs, "sender": "web_search"}
 
@@ -422,6 +479,19 @@ def build_chat_history() -> str:
 
 
 # ================================================================
+# SAFE HTML RENDERING
+# ================================================================
+def escape_html(text: str) -> str:
+    """Escape HTML special characters to prevent injection."""
+    return (text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#39;"))
+
+
+# ================================================================
 # MAIN UI
 # ================================================================
 def main():
@@ -473,10 +543,10 @@ def main():
                     count = ingest_pdfs_into_vectordb()
 
                 if count > 0:
-                    st.success(f"{count} chunks indexed!")
+                    st.success(f"✅ {count} chunks indexed successfully!")
                     st.session_state["pdf_ready"] = True
                 else:
-                    st.error("No text extracted from PDFs.")
+                    st.error("❌ No text extracted from PDFs. Please check your files.")
 
         st.markdown('<div class="styled-divider"></div>', unsafe_allow_html=True)
 
@@ -552,8 +622,15 @@ def main():
             st.markdown(m["content"])
             # Show sources if available
             if m["role"] == "assistant" and "sources" in m:
-                sources_html = '<div class="source-card"><strong>Sources:</strong> '
-                sources_html += " | ".join(m["sources"])
+                sources_html = '<div class="source-card"><strong>📚 Sources:</strong> '
+                source_items = []
+                for s in m["sources"][:5]:  # Limit to 5 sources
+                    escaped_source = escape_html(s)
+                    if s.startswith("http"):
+                        source_items.append(f'<a href="{escaped_source}" target="_blank">{escaped_source[:50]}...</a>')
+                    else:
+                        source_items.append(escaped_source)
+                sources_html += " | ".join(source_items)
                 sources_html += '</div>'
                 st.markdown(sources_html, unsafe_allow_html=True)
 
@@ -561,7 +638,7 @@ def main():
     if question := st.chat_input("Ask anything — PDFs or the web..."):
         # Validate API keys
         if not groq_key or groq_key.startswith("gsk_your"):
-            st.error("Please set your `GROQ_API_KEY` in the `.env` file.")
+            st.error("❌ Please set your `GROQ_API_KEY` in the `.env` file.")
             return
 
         st.session_state.messages.append({"role": "user", "content": question})
@@ -595,13 +672,14 @@ def main():
                             sources.append(src)
 
                     if sources:
-                        sources_html = '<div class="source-card"><strong>Sources:</strong> '
+                        sources_html = '<div class="source-card"><strong>📚 Sources:</strong> '
                         source_items = []
                         for s in sources[:5]:  # Cap at 5 sources
+                            escaped_source = escape_html(s)
                             if s.startswith("http"):
-                                source_items.append(f'<a href="{s}" target="_blank" style="color:#7c3aed">{s[:60]}...</a>')
+                                source_items.append(f'<a href="{escaped_source}" target="_blank">{escaped_source[:50]}...</a>')
                             else:
-                                source_items.append(s)
+                                source_items.append(escaped_source)
                         sources_html += " | ".join(source_items)
                         sources_html += '</div>'
                         st.markdown(sources_html, unsafe_allow_html=True)
@@ -613,7 +691,7 @@ def main():
                     })
 
                 except Exception as e:
-                    error_msg = f"An error occurred: {str(e)}"
+                    error_msg = f"❌ An error occurred: {str(e)}"
                     st.error(error_msg)
                     st.session_state.messages.append({
                         "role": "assistant",
