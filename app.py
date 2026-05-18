@@ -7,7 +7,7 @@ from typing_extensions import TypedDict
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_tavily import TavilySearch
@@ -17,11 +17,22 @@ from langgraph.graph import START, END, StateGraph
 
 load_dotenv()
 
+# --- Load API keys: .env locally, st.secrets on Streamlit Cloud ---
+def _get_secret(key: str) -> str:
+    """Return an API key from env-vars first, then st.secrets."""
+    val = os.getenv(key, "")
+    if val:
+        return val
+    try:
+        return st.secrets.get(key, "")
+    except Exception:
+        return ""
+
 # --- Constants ---
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 KNOWLEDGE_BASE_DIR = "knowledge-base"
-PERSIST_DIRECTORY = "chroma_db"
+FAISS_INDEX_DIR = "faiss_index"
 LLM_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -405,9 +416,10 @@ def ingest_pdfs_into_vectordb():
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     texts = text_splitter.split_documents(documents)
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-    if os.path.exists(PERSIST_DIRECTORY):
-        shutil.rmtree(PERSIST_DIRECTORY, ignore_errors=True)
-    Chroma.from_documents(texts, embeddings, persist_directory=PERSIST_DIRECTORY)
+    if os.path.exists(FAISS_INDEX_DIR):
+        shutil.rmtree(FAISS_INDEX_DIR, ignore_errors=True)
+    vectorstore = FAISS.from_documents(texts, embeddings)
+    vectorstore.save_local(FAISS_INDEX_DIR)
     return len(texts)
 
 
@@ -415,10 +427,10 @@ def ingest_pdfs_into_vectordb():
 # RETRIEVER
 # ================================================================
 def create_retriever():
-    if not os.path.exists(PERSIST_DIRECTORY):
+    if not os.path.exists(FAISS_INDEX_DIR):
         return None
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-    vectorstore = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
+    vectorstore = FAISS.load_local(FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
     return vectorstore.as_retriever(search_kwargs={"k": 3})
 
 
@@ -438,7 +450,7 @@ class GraphState(TypedDict):
 # ================================================================
 def router_node(state: GraphState) -> str:
     question = state["question"]
-    has_vectorstore = os.path.exists(PERSIST_DIRECTORY)
+    has_vectorstore = os.path.exists(FAISS_INDEX_DIR)
     if not has_vectorstore:
         return "web_search"
     prompt = f"""You are a routing assistant. Decide the best data source for the question.
@@ -560,8 +572,14 @@ def main():
         st.markdown("### 🧠 RAG Agent")
         st.markdown('<div class="styled-divider"></div>', unsafe_allow_html=True)
 
-        groq_key   = os.getenv("GROQ_API_KEY", "")
-        tavily_key = os.getenv("TAVILY_API_KEY", "")
+        groq_key   = _get_secret("GROQ_API_KEY")
+        tavily_key = _get_secret("TAVILY_API_KEY")
+
+        # Ensure env vars are set for libraries that read them directly
+        if groq_key:
+            os.environ["GROQ_API_KEY"] = groq_key
+        if tavily_key:
+            os.environ["TAVILY_API_KEY"] = tavily_key
 
         # --- PDF Upload ---
         st.markdown("**📄 Upload PDFs**")
@@ -591,7 +609,7 @@ def main():
         st.markdown('<div class="styled-divider"></div>', unsafe_allow_html=True)
 
         # --- Vector DB Status ---
-        db_exists = os.path.exists(PERSIST_DIRECTORY)
+        db_exists = os.path.exists(FAISS_INDEX_DIR)
         st.markdown(
             f'<div class="badge-row">'
             f'<div class="status-badge {"status-ready" if db_exists else "status-waiting"}">'
@@ -620,8 +638,8 @@ def main():
         with col2:
             if st.button("🔄 Reset All", use_container_width=True):
                 st.session_state.messages = []
-                if os.path.exists(PERSIST_DIRECTORY):
-                    shutil.rmtree(PERSIST_DIRECTORY, ignore_errors=True)
+                if os.path.exists(FAISS_INDEX_DIR):
+                    shutil.rmtree(FAISS_INDEX_DIR, ignore_errors=True)
                 if os.path.exists(KNOWLEDGE_BASE_DIR):
                     shutil.rmtree(KNOWLEDGE_BASE_DIR, ignore_errors=True)
                 st.session_state["pdf_ready"] = False
@@ -731,8 +749,6 @@ def main():
                     st.error(error_msg)
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
-
-graph = build_graph()
 
 if __name__ == "__main__":
     main()
