@@ -6,7 +6,7 @@ from typing import List
 from typing_extensions import TypedDict
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -35,6 +35,14 @@ KNOWLEDGE_BASE_DIR = "knowledge-base"
 FAISS_INDEX_DIR = "faiss_index"
 LLM_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+# ================================================================
+# CACHED EMBEDDINGS — avoids re-downloading model on every rerun
+# ================================================================
+@st.cache_resource(show_spinner="Loading embedding model...")
+def get_embeddings():
+    return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
 
 # ================================================================
@@ -415,7 +423,7 @@ def ingest_pdfs_into_vectordb():
         return 0
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     texts = text_splitter.split_documents(documents)
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    embeddings = get_embeddings()
     if os.path.exists(FAISS_INDEX_DIR):
         shutil.rmtree(FAISS_INDEX_DIR, ignore_errors=True)
     vectorstore = FAISS.from_documents(texts, embeddings)
@@ -429,7 +437,7 @@ def ingest_pdfs_into_vectordb():
 def create_retriever():
     if not os.path.exists(FAISS_INDEX_DIR):
         return None
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    embeddings = get_embeddings()
     vectorstore = FAISS.load_local(FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
     return vectorstore.as_retriever(search_kwargs={"k": 3})
 
@@ -750,5 +758,4 @@ def main():
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
 
-if __name__ == "__main__":
-    main()
+main()
