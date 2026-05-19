@@ -4,6 +4,13 @@ An intelligent AI-powered chatbot that can answer questions using both **uploade
 
 ---
 
+## 🚀 Live Demo
+
+🌐 **Live Deploy:**  
+[RAG Agent Live Demo](https://ragagent-avduawyfenilbybxmemvwx.streamlit.app/)
+
+---
+
 ## 🚀 Features
 
 - 📤 Upload and analyze PDF documents  
@@ -48,3 +55,64 @@ Relevant data retrieved
 LLM generates final answer
         ↓
 Answer displayed with source
+```
+
+---
+
+## 🛠️ Tech Stack
+
+- **Frontend:** Streamlit  
+- **Backend:** Python  
+- **LLM Framework:** LangChain  
+- **Vector Database:** ChromaDB  
+- **Embeddings:** HuggingFace Embeddings  
+- **LLM:** Groq / Gemini / OpenAI  
+- **PDF Processing:** PyPDFLoader  
+- **Web Search:** Tavily Search API  
+- **Environment Management:** Python Dotenv  
+
+---
+
+## 📌 Use Cases
+
+- 📚 Research Assistant  
+- 🏥 Healthcare Information Retrieval  
+- 📄 Company Policy Q&A  
+- 🎓 Educational Chatbot  
+- 📑 Document-based AI Assistant  
+
+---
+
+## 💡 Key Concepts Used
+
+- Retrieval-Augmented Generation (RAG)  
+- Vector Embeddings  
+- Semantic Search  
+- AI Routing Logic  
+- Prompt Engineering  
+- Context-Aware Response Generation  
+
+---
+
+## 📷 Project Output
+
+- Users can upload PDFs and ask questions directly from the document  
+- If the answer is unavailable in the PDF, the agent automatically switches to web search  
+- Responses include the source of information for better reliability  
+
+---
+
+## 🔮 Future Improvements
+
+- Multi-PDF support  
+- Chat history memory  
+- Voice-based interaction  
+- Authentication system  
+- Advanced reranking for retrieval accuracy  
+- Deployment using Docker & Kubernetes  
+
+---
+
+## 👨‍💻 Author
+
+Developed by **Kamal Sandeep** 🚀
